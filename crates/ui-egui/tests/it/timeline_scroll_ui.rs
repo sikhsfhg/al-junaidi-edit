@@ -156,34 +156,41 @@ fn none() -> Value {
 }
 
 #[test]
-fn the_wheel_moves_the_tracks_up_and_down() {
+fn the_wheel_moves_the_timeline_sideways_and_cmd_wheel_moves_the_tracks() {
     let mut d = Driver::tall();
-    // over the video tracks: wheeling up brings the higher tracks in (Video 1 is at the bottom)
-    d.wheel(0.2, 0.0, 40.0, none());
-    assert_eq!(d.view(), (4.0, 50.0, 40.0, 0.0), "the video tracks moved, nothing else");
-    d.wheel(0.2, 0.0, -25.0, none());
-    assert_eq!(d.view(), (4.0, 50.0, 15.0, 0.0));
-    // over the audio tracks: wheeling down brings the lower tracks in
-    d.wheel(0.8, 0.0, -30.0, none());
-    assert_eq!(d.view(), (4.0, 50.0, 15.0, 30.0));
-    // neither half goes past its first or last track
-    d.wheel(0.2, 0.0, -1e6, none());
-    d.wheel(0.8, 0.0, 1e6, none());
-    assert_eq!(d.view(), (4.0, 50.0, 0.0, 0.0));
-    d.wheel(0.8, 0.0, -1e6, none());
-    let (_, _, _, lowest) = d.view();
-    assert!(lowest > 100.0 && lowest < 15.0 * 200.0, "{lowest}");
+    assert_eq!(d.app().session.prefs.timeline.mouse_scrolling, "horizontal");
+    // Plain wheel: sideways, a point of wheel for a point of Timeline
+    // Wheeling down (-100.0) moves timeline right (showing later clips)
+    d.wheel(0.2, 0.0, -100.0, none());
+    assert_eq!(d.view(), (6.0, 50.0, 0.0, 0.0), "100 points at 50 pps: 2 s later");
+    // Wheeling up (250.0) moves timeline left (showing earlier clips)
+    d.wheel(0.8, 0.0, 250.0, none());
+    assert_eq!(d.view(), (1.0, 50.0, 0.0, 0.0));
+    // Cmd + wheel: moves the tracks up and down
+    d.wheel(0.2, 0.0, 40.0, json!({"command": true}));
+    assert_eq!(d.view(), (1.0, 50.0, 40.0, 0.0), "the video tracks moved with command");
+    d.wheel(0.8, 0.0, -30.0, json!({"command": true}));
+    assert_eq!(d.view(), (1.0, 50.0, 40.0, 30.0), "the audio tracks moved with command");
 }
 
 #[test]
-fn cmd_wheel_moves_the_timeline_sideways_and_option_wheel_zooms() {
+fn the_wheel_over_the_ruler_does_not_scroll() {
     let mut d = Driver::tall();
-    // Cmd + wheel: sideways, a point of wheel for a point of Timeline; the tracks stay
-    d.wheel(0.2, 0.0, -100.0, json!({"command": true}));
+    // Turning the wheel over the Time Ruler does not scroll the timeline horizontally or tracks vertically
+    d.ok("ui.scroll", json!({"id": "timeline.ruler", "fx": 0.5, "fy": 0.5, "dx": 0.0, "dy": -100.0, "modifiers": none()}));
+    d.frames(3);
+    assert_eq!(d.view(), (4.0, 50.0, 0.0, 0.0), "ruler ignores wheel scrolling");
+}
+
+#[test]
+fn wheel_moves_the_timeline_sideways_and_option_wheel_zooms() {
+    let mut d = Driver::tall();
+    // Plain wheel: sideways, a point of wheel for a point of Timeline; the tracks stay
+    d.wheel(0.2, 0.0, -100.0, none());
     assert_eq!(d.view(), (6.0, 50.0, 0.0, 0.0), "100 points at 50 points a second: 2 s later");
-    d.wheel(0.8, 0.0, 250.0, json!({"command": true}));
+    d.wheel(0.8, 0.0, 250.0, none());
     assert_eq!(d.view(), (1.0, 50.0, 0.0, 0.0));
-    d.wheel(0.8, 0.0, 1e5, json!({"command": true}));
+    d.wheel(0.8, 0.0, 1e5, none());
     assert_eq!(d.view().0, 0.0, "not before the start");
     // Option + wheel: zoom about the pointer; it is not what Cmd + wheel does
     d.ok("ui.set", json!({"timeline": {"scroll": 4.0}}));
@@ -206,17 +213,17 @@ fn cmd_wheel_moves_the_timeline_sideways_and_option_wheel_zooms() {
     assert_eq!(d.view(), (6.0, 50.0, 0.0, 0.0));
 }
 
-/// Settings ▸ Timeline ▸ Timeline Mouse Scrolling "Horizontal": the wheel moves the Timeline
-/// sideways and Cmd + wheel moves the tracks.
+/// Settings ▸ Timeline ▸ Timeline Mouse Scrolling "Vertical": the wheel moves the tracks
+/// up and down and Cmd + wheel moves the Timeline sideways.
 #[test]
 fn the_mouse_scrolling_setting_swaps_wheel_and_cmd_wheel() {
     let mut d = Driver::tall();
-    assert_eq!(d.app().session.prefs.timeline.mouse_scrolling, "vertical", "Premiere's default on macOS");
-    d.app().session.prefs.timeline.mouse_scrolling = "horizontal".into();
-    d.wheel(0.2, 0.0, -100.0, none());
-    assert_eq!(d.view(), (6.0, 50.0, 0.0, 0.0));
-    d.wheel(0.2, 0.0, 40.0, json!({"command": true}));
-    assert_eq!(d.view(), (6.0, 50.0, 40.0, 0.0));
+    assert_eq!(d.app().session.prefs.timeline.mouse_scrolling, "horizontal");
+    d.app().session.prefs.timeline.mouse_scrolling = "vertical".into();
+    d.wheel(0.2, 0.0, 40.0, none());
+    assert_eq!(d.view(), (4.0, 50.0, 40.0, 0.0), "vertical moves tracks by default");
+    d.wheel(0.2, 0.0, -100.0, json!({"command": true}));
+    assert_eq!(d.view(), (6.0, 50.0, 40.0, 0.0), "Cmd + wheel moves sideways");
     d.wheel(0.2, 0.0, 20.0, json!({"alt": true}));
     assert!((d.view().1 - 60.0).abs() < 1e-6, "Option + wheel zooms either way");
 }
@@ -232,9 +239,9 @@ fn the_view_stops_ten_minutes_past_the_end_of_the_sequence() {
     let limit = max_scroll(seconds, width, 50.0);
     assert!((limit - (seconds + 600.0 - width as f64 / 50.0)).abs() < 1e-9);
     // by the wheel
-    d.wheel(0.2, 0.0, -1e7, json!({"command": true}));
+    d.wheel(0.2, 0.0, -1e7, none());
     assert!((d.view().0 - limit).abs() < 1e-6, "{} vs {limit}", d.view().0);
-    d.wheel(0.2, 0.0, -500.0, json!({"command": true}));
+    d.wheel(0.2, 0.0, -500.0, none());
     assert!((d.view().0 - limit).abs() < 1e-6);
     // by anything else that moves the view (a script here: the state that was reported stuck)
     d.ok("ui.set", json!({"timeline": {"pps": 2.9863201066269047, "scroll": 2325.538505030118}}));

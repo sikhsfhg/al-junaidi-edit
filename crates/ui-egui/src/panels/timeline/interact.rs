@@ -261,6 +261,16 @@ fn wheel_scroll(app: &mut FilmcraftApp, ui: &mut egui::Ui, rect: Rect, layout: &
     if ui.rect_contains_pointer(rect)
         && let Some(p) = ctx.pointer_hover_pos()
     {
+        // Exclude the Time Ruler: wheel input over the ruler must not scroll the view
+        if layout.ruler.contains(p) {
+            return;
+        }
+        // Active over both tracks/clips content and track headers
+        let tracks_and_headers = Rect::from_min_max(pos2(rect.min.x, layout.content.min.y), layout.content.max);
+        if !tracks_and_headers.contains(p) {
+            return;
+        }
+
         let w = wheel_input(&ctx);
         if (w.pinch - 1.0).abs() > 1e-4 || (w.alt && w.delta.y != 0.0) {
             let f = if (w.pinch - 1.0).abs() > 1e-4 { w.pinch as f64 } else { (1.0_f64 + w.delta.y as f64 * 0.01).clamp(0.5, 2.0) };
