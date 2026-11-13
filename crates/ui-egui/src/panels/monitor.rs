@@ -79,11 +79,13 @@ fn draw_picture(app: &mut FilmcraftApp, ui: &mut egui::Ui, which: Which, mv: &cr
         (None, Target::Sequence(s)) if live => Target::SequenceLive(s),
         (_, t) => t,
     };
-    // Draft decoding (opt-in): only while playing at 1/2 resolution or lower.
-    let draft = crate::frames::draft_playback(playing, scale, app.session.prefs.playback.draft_decode);
+    let speed = if which == Which::Program { app.playback.speed } else { app.source_playback.clock.speed };
+    // Draft decoding (opt-in): only while playing at 1/2 resolution or lower,
+    // or when shuttle playback is fast (speed.abs() >= 2.0).
+    let draft = crate::frames::draft_playback(playing, scale, app.session.prefs.playback.draft_decode)
+        || (playing && speed.abs() >= 2.0);
     let key = FrameKey { target, frame, size: size_key, revision: rev, draft };
     let project = app.session.project.clone();
-    let speed = if which == Which::Program { app.playback.speed } else { app.source_playback.clock.speed };
     // while playing, which way: frames on the other side of the playhead are not due yet
     let dir = playing.then(|| play_direction(speed));
     if playing {

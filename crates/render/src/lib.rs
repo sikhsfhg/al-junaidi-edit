@@ -662,7 +662,13 @@ fn plain_layer(frame: &Arc<VideoFrame>, n: usize, opacity: f32, blend: Blend) ->
 /// convert it with.
 fn media_frame(item: &TrackItem, t: Tick, sources: &dyn SourceProvider, want: f32, src_size: (u32, u32)) -> Option<(SharedSource, Arc<VideoFrame>, usize)> {
     let src = sources.source(item.item)?;
-    let frame = src.video_frame(FrameRequest { time: video_source_time(item, t, src.info().frame_rate()), scale: want }).ok()?;
+    let time = video_source_time(item, t, src.info().frame_rate());
+    let fast = item.speed.abs() >= 2.0 && filmcraft_media::cancel::catch_up().is_some();
+    let frame = if fast {
+        filmcraft_media::cancel::with_draft(true, || src.video_frame(FrameRequest { time, scale: want })).ok()?
+    } else {
+        src.video_frame(FrameRequest { time, scale: want }).ok()?
+    };
     let n = decimation(frame.width as f32, src_size.0 as f32 * want);
     Some((src, frame, n))
 }
@@ -693,14 +699,22 @@ struct MediaFrame<'a> {
 fn media_image(project: &Project, seq: &Sequence, item: &TrackItem, t: Tick, mf: MediaFrame<'_>, want: f32) -> Image {
     let MediaFrame { src, frame, n } = mf;
     let img = colorman::decode(project, item.item, frame, n, &seq.settings.color);
+    let fast = item.speed.abs() >= 2.0 && filmcraft_media::cancel::catch_up().is_some();
     match media_interpolation(item, t, src, seq.settings.frame_rate) {
-        Some((next_time, wgt)) => match src.video_frame(FrameRequest { time: next_time, scale: want }) {
-            Ok(f2) if f2.width == frame.width && f2.height == frame.height => {
-                let b = colorman::decode(project, item.item, &f2, n, &seq.settings.color);
-                if item.time_interpolation == filmcraft_project::TimeInterpolation::OpticalFlow { flow::interpolate(&img, &b, wgt) } else { img.lerp(&b, wgt) }
+        Some((next_time, wgt)) => {
+            let res = if fast {
+                filmcraft_media::cancel::with_draft(true, || src.video_frame(FrameRequest { time: next_time, scale: want }))
+            } else {
+                src.video_frame(FrameRequest { time: next_time, scale: want })
+            };
+            match res {
+                Ok(f2) if f2.width == frame.width && f2.height == frame.height => {
+                    let b = colorman::decode(project, item.item, &f2, n, &seq.settings.color);
+                    if item.time_interpolation == filmcraft_project::TimeInterpolation::OpticalFlow { flow::interpolate(&img, &b, wgt) } else { img.lerp(&b, wgt) }
+                }
+                _ => img,
             }
-            _ => img,
-        },
+        }
         None => img,
     }
 }

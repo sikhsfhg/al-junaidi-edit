@@ -583,9 +583,15 @@ fn push_item(sc: Scene, item: &TrackItem, extra_opacity: f32, blend: Option<Blen
         let lin = ((motion.a * motion.a + motion.b * motion.b).sqrt()).max((motion.c * motion.c + motion.d * motion.d).sqrt());
         let want = (lin * opts.scale as f64).clamp(1.0 / 64.0, 1.0) as f32;
         let time = crate::video_source_time(item, t, src.info().frame_rate());
+        let fast = item.speed.abs() >= 2.0 && filmcraft_media::cancel::catch_up().is_some();
+        let res = if fast {
+            filmcraft_media::cancel::with_draft(true, || src.video_frame_unturned(FrameRequest { time, scale: want }))
+        } else {
+            src.video_frame_unturned(FrameRequest { time, scale: want })
+        };
         // The GPU turns the frame as decoded, the container's display rotation folded into the
         // layer's matrix or its effect stage: turning a 4K frame on the CPU is too slow to play (#3467).
-        let Ok((frame, turns)) = src.video_frame_unturned(FrameRequest { time, scale: want }) else { return };
+        let Ok((frame, turns)) = res else { return };
         let upright = |f: &VideoFrame| if turns % 2 == 1 { (f.height, f.width) } else { (f.width, f.height) };
         let cs = crate::colorman::source_space(project, item.item, &frame);
         // HDR and wide-gamut media on a Rec. 709 sequence is converted on the GPU too (#965); log

@@ -820,11 +820,14 @@ fn drag_update(app: &mut FilmcraftApp, ui: &mut egui::Ui, resp: &egui::Response,
         // auto-scroll when dragging near the edges
         if !matches!(app.tl.drag, Some(Drag::Pan { .. }) | Some(Drag::ZoomBar { .. }) | Some(Drag::Volume(_))) {
             let v = &mut app.ui.timeline;
+            let dt = ctx.input(|i| i.stable_dt).clamp(0.001, 0.05) as f64;
+            // Moderate, natural auto-scroll speed (~100 points/second instead of jumping by 6.0 pts per frame)
+            let step = (100.0 * dt / v.pps).max(0.001);
             if p.x > layout.content.max.x - 20.0 {
-                v.target_scroll += 6.0 / v.pps;
+                v.target_scroll += step;
                 v.scroll = v.target_scroll;
             } else if p.x < layout.content.min.x + 10.0 && v.scroll > 0.0 {
-                v.target_scroll = (v.target_scroll - 6.0 / v.pps).max(0.0);
+                v.target_scroll = (v.target_scroll - step).max(0.0);
                 v.scroll = v.target_scroll;
             }
         }

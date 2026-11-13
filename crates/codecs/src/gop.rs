@@ -890,6 +890,22 @@ impl GopCache {
             st.background &= background;
             return Ok(Taken { pts: want_pts, frame, raw: st.raw.contains(&want_pts) });
         }
+        if draft {
+            let key = decode_start(s, i);
+            let running = st.next != usize::MAX && st.next <= n && st.start <= key;
+            let near = st.next <= key && key - st.next <= CONTINUE_THROUGH;
+            let continuing = running && (st.next > key || near) && (i >= st.next || (st.start <= i && want_pts > st.out_max));
+            let needed = if continuing && i >= st.next { i - st.next } else if continuing { 0 } else { i.saturating_sub(key) };
+            if needed > 8 {
+                if let Some(taken) = st.at_or_before(want_pts, draft) {
+                    if taken.pts >= s.pts(key) {
+                        HITS.fetch_add(1, Ordering::Relaxed);
+                        st.background &= background;
+                        return Ok(taken);
+                    }
+                }
+            }
+        }
         MISSES.fetch_add(1, Ordering::Relaxed);
         if !background {
             st.background = false;
@@ -935,6 +951,9 @@ impl GopCache {
         // playback wants those frames anyway.
         let near = st.next <= key && key - st.next <= CONTINUE_THROUGH;
         let continuing = running && (st.next > key || near) && (i >= st.next || (st.start <= i && want_pts > st.out_max));
+        let needed = if continuing && i >= st.next { i - st.next } else if continuing { 0 } else { i.saturating_sub(key) };
+        let target_i = if draft && needed > 8 { key } else { i };
+        let target_pts = s.pts(target_i);
         if !continuing {
             SEEKS.fetch_add(1, Ordering::Relaxed);
             key = random_access_at_or_before(s, key, |data| st.decoder.as_ref().and_then(|d| d.is_random_access(data)))?;
@@ -945,8 +964,8 @@ impl GopCache {
             st.start = key;
             st.out_max = i64::MIN;
         }
-        let limit = (i.max(st.next) + 64).min(n);
-        let late = late_before.unwrap_or(i64::MIN).min(want_pts);
+        let limit = (target_i.max(st.next) + 64).min(n);
+        let late = late_before.unwrap_or(i64::MIN).min(target_pts);
         let Some(decoder) = st.decoder.as_mut() else {
             return Err(CodecError::Decode("no video decoder".into()));
         };
@@ -967,7 +986,7 @@ impl GopCache {
             }
             let k = st.next;
             let data = s.read(k)?;
-            if k != i && s.pts(k) < late && st.decoder.as_ref().is_some_and(|d| d.is_disposable(&data)) {
+            if k != target_i && s.pts(k) < late && st.decoder.as_ref().is_some_and(|d| d.is_disposable(&data)) {
                 st.next += 1;
                 SKIPPED.fetch_add(1, Ordering::Relaxed);
                 continue;
@@ -978,14 +997,14 @@ impl GopCache {
             let out = timed(|| decoder.decode(&data, s.pts(k)))?;
             st.next += 1;
             DECODED.fetch_add(1, Ordering::Relaxed);
-            keep(&mut mine, self.store_output(st, out, want_pts));
-            if st.cached(want_pts, draft).is_some() {
+            keep(&mut mine, self.store_output(st, out, target_pts));
+            if st.cached(target_pts, draft).is_some() {
                 break;
             }
         }
-        if st.cached(want_pts, draft).is_none() {
+        if st.cached(target_pts, draft).is_none() {
             let out = st.decoder.as_mut().map(|d| timed(|| d.flush())).unwrap_or_default();
-            keep(&mut mine, self.store_output(st, out, want_pts));
+            keep(&mut mine, self.store_output(st, out, target_pts));
             st.next = usize::MAX;
         }
         // nearest decoded frame at or before the wanted pts (robust to decoder pts quirks); a closer
